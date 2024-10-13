@@ -97,3 +97,6 @@ if __name__ == "__main__":
     plt.grid(True)
     plt.savefig('block_size_vs_time.png')
     plt.show()
+
+    speedup = cpu_time / gpu_time
+    print(f"Speedup: {speedup:.2f}x")
