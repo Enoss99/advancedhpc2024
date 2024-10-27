@@ -57,21 +57,22 @@ def blend_images(image1, image2, output, blend_coef):
         output[x, y] = int(min(255, max(0, blended_value)))  
 
 if __name__ == "__main__":
-
-    img, width, height = loaf_image('peterAsylum.ppm')
+    img, width, height = loaf_image('drunkCat.ppm')
     grayscale_img = rgb_to_grayscale(img)  
-
+    
+    
     threads_per_block = (16, 16)
     blocks_per_grid_x = (width + threads_per_block[0] - 1) // threads_per_block[0]
     blocks_per_grid_y = (height + threads_per_block[1] - 1) // threads_per_block[1]
     blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
-    threshold = np.uint8(128)  
+    
+    threshold = np.uint8(128) 
     binarized_output = np.zeros((height, width), dtype=np.uint8)
-    d_image = cuda.to_device(grayscale_img)  
+    d_image = cuda.to_device(grayscale_img) 
     d_output = cuda.device_array_like(binarized_output)
     binarize_image[blocks_per_grid, threads_per_block](d_image, d_output, threshold)
-    binarized_output = d_output.copy_to_host() * 255 
+    binarized_output = d_output.copy_to_host() * 255  
 
     with open("binarized_image.pgm", "wb") as f: 
         f.write(b"P5\n")
@@ -79,7 +80,7 @@ if __name__ == "__main__":
         f.write(b"255\n")
         f.write(binarized_output.tobytes())
 
- 
+    
     brightness_offset = 50
     brightness_output = np.zeros((height, width), dtype=np.uint8)
     adjust_brightness[blocks_per_grid, threads_per_block](d_image, d_output, brightness_offset)
@@ -92,8 +93,8 @@ if __name__ == "__main__":
         f.write(brightness_output.tobytes())
 
    
-    img2 = np.ascontiguousarray(np.flip(grayscale_img, axis=0)) 
-    d_image2 = cuda.to_device(img2)  
+    img2 = np.ascontiguousarray(np.flip(grayscale_img, axis=0))  
+    d_image2 = cuda.to_device(img2) 
     blended_output = np.zeros((height, width), dtype=np.uint8)
     d_output = cuda.device_array_like(blended_output)
     blend_images[blocks_per_grid, threads_per_block](d_image, d_image2, d_output, 0.5)

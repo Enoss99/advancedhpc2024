@@ -1,0 +1,48 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{listings}
+
+\title{Lab Report 6: MAP}
+\author{Julien}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+
+\section{Implementation}
+\textbf{Image Loading:} Images are loaded in RGB and converted to grayscale using:
+\[
+\text{Grayscale} = 0.2989 R + 0.5870 G + 0.1140 B
+\]
+
+\textbf{CUDA Kernels:} 
+\begin{itemize}
+    \item \texttt{binarize\_image}: Sets each pixel to 0 or 1 based on a threshold.
+    \item \texttt{adjust\_brightness}: Adds an offset to each pixel.
+    \item \texttt{blend\_images}: Averages two images based on a blend coefficient.
+\end{itemize}
+
+\section{Block Size Experiments}
+Block sizes $(8 \times 8)$, $(16 \times 16)$, and $(32 \times 32)$ were tested to measure performance:
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Block Size} & \textbf{Binarization (s)} & \textbf{Brightness (s)} & \textbf{Blending (s)} \\
+\hline
+$8 \times 8$ & 0.032 & 0.034 & 0.035 \\
+$16 \times 16$ & 0.018 & 0.020 & 0.021 \\
+$32 \times 32$ & 0.015 & 0.016 & 0.017 \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+Larger blocks generally improved speed, with $(32 \times 32)$ performing best.
+
+\end{document}
