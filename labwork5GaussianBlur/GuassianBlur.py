@@ -102,6 +102,7 @@ if __name__ == "__main__":
     img, width, height = loaf_image('peterAsylum.ppm')
     grayscale_img = rgb_to_grayscale(img)
     #CPU
+    blurred_img_no_shared = gaussian_blur_not_shared(grayscale_img)
     blurred_img_no_shared, no_shared_time = measure_time(gaussian_blur_not_shared, grayscale_img)
     print(f"Time without shared memory: {no_shared_time:.6f} seconds")
     #GPU
