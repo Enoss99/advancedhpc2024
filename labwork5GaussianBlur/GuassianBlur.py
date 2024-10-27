@@ -1,5 +1,42 @@
+import time
+from numba import cuda, float32
 import numpy as np
-from numba import cuda
+
+gaussian_kernel = np.array([
+    [0, 0, 1, 2, 1, 0, 0],
+    [0, 3, 13, 22, 13, 3, 0],
+    [1, 13, 59, 97, 59, 13, 1],
+    [2, 22, 97, 159, 97, 22, 2],
+    [1, 13, 59, 97, 59, 13, 1],
+    [0, 3, 13, 22, 13, 3, 0],
+    [0, 0, 1, 2, 1, 0, 0]
+], dtype=np.float32)
+kernel_sum = np.sum(gaussian_kernel)
+gaussian_kernel = gaussian_kernel / kernel_sum  
+
+def gaussian_blur_not_shared(img):
+    height, width = len(img), len(img[0])
+    output_img = [[0 for _ in range(width)] for _ in range(height)]
+    for x in range(3, width - 3):
+        for y in range(3, height - 3):
+            val = 0.0
+            for i in range(-3, 4):
+                for j in range(-3, 4):
+                    val += img[y + j][x + i] * gaussian_kernel[j + 3, i + 3]
+            output_img[y][x] = min(max(int(val), 0), 255)
+    return output_img
+
+@cuda.jit
+def gaussian_blur_shared_memory_cuda(input_img, output_img, kernel):
+    x, y = cuda.grid(2)
+    if x < 3 or y < 3 or x >= input_img.shape[0] - 3 or y >= input_img.shape[1] - 3:
+        return 
+
+    val = 0.0
+    for i in range(-3, 4):
+        for j in range(-3, 4):
+            val += input_img[x + i, y + j] * kernel[i + 3, j + 3]
+    output_img[x, y] = min(max(int(val), 0), 255)
 
 def loaf_image(image_path):
     with open(image_path, 'rb') as f:
@@ -15,92 +52,78 @@ def loaf_image(image_path):
             raise ValueError(f"Unexpected max color value: {max_val}")
         img_data = f.read()
         img = []
-        for y in range(height):
-            row = []
-            for x in range(width):
-                idx = (y * width + x) * 3
-                r = img_data[idx]
-                g = img_data[idx + 1]
-                b = img_data[idx + 2]
-                row.append((r, g, b))
-            img.append(row)
-    return np.array(img, dtype=np.uint8), width, height
+    for y in range(height):
+        row = []
+        for x in range(width):
+            idx = (y * width + x) * 3
+            r = img_data[idx]
+            g = img_data[idx + 1]
+            b = img_data[idx + 2]
+            row.append((r, g, b))
+        img.append(row)
+
+    return img, width, height
 
 def rgb_to_grayscale(img):
-    height, width = img.shape[0], img.shape[1]
-    grayscale_img = np.zeros((height, width), dtype=np.uint8)
+    height, width = len(img), len(img[0])
+    grayscale_img = [[0 for _ in range(width)] for _ in range(height)]
+
     for y in range(height):
         for x in range(width):
-            r, g, b = img[y, x]
-            grayscale_img[y, x] = int(0.2989 * r + 0.5870 * g + 0.1140 * b)
+            r, g, b = img[y][x]
+            grayscale_value = 0.2989 * r + 0.5870 * g + 0.1140 * b
+            grayscale_img[y][x] = int(grayscale_value)
+
     return grayscale_img
 
-@cuda.jit
-def binarize_image(image, output, threshold):
-    x, y = cuda.grid(2)
-    if x < image.shape[0] and y < image.shape[1]:  
-        pixel_value = image[x, y]
-        output[x, y] = 1 if pixel_value >= threshold else 0
+def measure_time(func, img):
+    start = time.time()
+    result = func(img)
+    end = time.time()
+    return result, end - start
 
-@cuda.jit
-def adjust_brightness(image, output, brightness_offset):
-    x, y = cuda.grid(2)
-    if x < image.shape[0] and y < image.shape[1]:  
-        new_value = image[x, y] + brightness_offset
-        output[x, y] = max(0, min(255, new_value))
+#couldn't actually see the blurred image so i made this
+def apply_multiple_passes_NS(img, num_passes=5):
+    blurred_img = img
+    for _ in range(num_passes):
+        blurred_img = gaussian_blur_not_shared(blurred_img)
+    return blurred_img
 
-@cuda.jit
-def blend_images(image1, image2, output, blend_coef):
-    x, y = cuda.grid(2)
-    if x < image1.shape[0] and y < image1.shape[1]:
-        blended_value = blend_coef * image1[x, y] + (1 - blend_coef) * image2[x, y]
-        output[x, y] = int(min(255, max(0, blended_value)))  
+def save_image_ppm(filepath, img, width, height):
+    with open(filepath, 'wb') as f:
+
+        f.write(f"P6\n{width} {height}\n255\n".encode())
+        for row in img:
+            for pixel in row:
+                r = g = b = pixel
+                f.write(bytes([r, g, b]))
 
 if __name__ == "__main__":
-
     img, width, height = loaf_image('peterAsylum.ppm')
-    grayscale_img = rgb_to_grayscale(img)  
-
+    grayscale_img = rgb_to_grayscale(img)
+    #CPU
+    blurred_img_no_shared = gaussian_blur_not_shared(grayscale_img)
+    blurred_img_no_shared, no_shared_time = measure_time(gaussian_blur_not_shared, grayscale_img)
+    print(f"Time without shared memory: {no_shared_time:.6f} seconds")
+    #GPU
+    d_input = cuda.to_device(np.array(grayscale_img, dtype=np.uint8))
+    d_output = cuda.device_array_like(d_input)
+    d_gaussian_kernel = cuda.to_device(gaussian_kernel)  
     threads_per_block = (16, 16)
-    blocks_per_grid_x = (width + threads_per_block[0] - 1) // threads_per_block[0]
-    blocks_per_grid_y = (height + threads_per_block[1] - 1) // threads_per_block[1]
+    blocks_per_grid_x = (d_input.shape[0] + threads_per_block[0] - 1) // threads_per_block[0]
+    blocks_per_grid_y = (d_input.shape[1] + threads_per_block[1] - 1) // threads_per_block[1]
     blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
-    threshold = np.uint8(128)  
-    binarized_output = np.zeros((height, width), dtype=np.uint8)
-    d_image = cuda.to_device(grayscale_img)  
-    d_output = cuda.device_array_like(binarized_output)
-    binarize_image[blocks_per_grid, threads_per_block](d_image, d_output, threshold)
-    binarized_output = d_output.copy_to_host() * 255 
+    start = time.time()
+    blurred_img_shared = gaussian_blur_shared_memory_cuda[blocks_per_grid, threads_per_block](d_input, d_output, d_gaussian_kernel)
 
-    with open("binarized_image.pgm", "wb") as f: 
-        f.write(b"P5\n")
-        f.write(f"{width} {height}\n".encode())
-        f.write(b"255\n")
-        f.write(binarized_output.tobytes())
+    cuda.synchronize()
+    shared_time = time.time() - start
+    blurred_img_shared = d_output.copy_to_host()
 
- 
-    brightness_offset = 50
-    brightness_output = np.zeros((height, width), dtype=np.uint8)
-    adjust_brightness[blocks_per_grid, threads_per_block](d_image, d_output, brightness_offset)
-    brightness_output = d_output.copy_to_host()
+    print(f"Time with shared memory: {shared_time:.6f} seconds")
+    speedup = no_shared_time / shared_time
+    print(f"Speedup: {speedup:.2f}")
 
-    with open("adjusted_brightness_image.pgm", "wb") as f:  
-        f.write(b"P5\n")
-        f.write(f"{width} {height}\n".encode())
-        f.write(b"255\n")
-        f.write(brightness_output.tobytes())
-
-   
-    img2 = np.ascontiguousarray(np.flip(grayscale_img, axis=0)) 
-    d_image2 = cuda.to_device(img2)  
-    blended_output = np.zeros((height, width), dtype=np.uint8)
-    d_output = cuda.device_array_like(blended_output)
-    blend_images[blocks_per_grid, threads_per_block](d_image, d_image2, d_output, 0.5)
-    blended_output = d_output.copy_to_host()
-
-    with open("blended_image.pgm", "wb") as f:  
-        f.write(b"P5\n")
-        f.write(f"{width} {height}\n".encode())
-        f.write(b"255\n")
-        f.write(blended_output.tobytes())
+    save_image_ppm('blurred_image_no_shared.ppm', blurred_img_no_shared, width, height)
+    save_image_ppm('blurred_image_shared.ppm', blurred_img_shared, width, height)
