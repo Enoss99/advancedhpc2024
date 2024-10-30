@@ -1,0 +1,57 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{hyperref}
+
+\title{Report 10: FINALE}
+\author{Julien CHAPUIS}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Kuwahara Filter Implementation}
+
+The Kuwahara filter was applied using two primary GPU approaches:
+\begin{itemize}
+    \item \textbf{GPU without shared memory}: Directly accesses global memory.
+    \item \textbf{GPU with shared memory}: Utilizes CUDA’s shared memory to reduce global memory access overhead.
+\end{itemize}
+
+\subsection{Without Shared Memory}
+This version uses direct access to global memory, calculating the mean and variance for each region within the Kuwahara window for each pixel. The pixel is then assigned a color based on the region with the lowest variance.
+
+\subsection{With Shared Memory}
+The shared memory version loads the surrounding window for each pixel into shared memory before processing, reducing redundant global memory accesses. This version performs more efficiently due to the lowered latency of shared memory.
+
+\section{Performance Analysis and Speedup}
+
+Execution times were measured for each approach, and speedup was calculated to quantify the benefits of using shared memory.
+
+\subsection{Execution Time}
+\begin{verbatim}
+Non-shared memory execution time: 0.319630 seconds
+Shared memory execution time: 0.219874 seconds
+\end{verbatim}
+
+\subsection{Speedup Calculation}
+The speedup obtained by comparing the shared memory to the non-shared memory implementation is as follows:
+\[
+\text{Speedup}_{\text{Shared/Non-Shared}} = \frac{0.319630}{0.219874} \approx 1.45
+\]
+
+\section{Optimizations and Observations}
+
+\subsection{Bank Conflicts}
+To prevent shared memory bank conflicts, the code carefully aligns data access within each thread block, ensuring no two threads access the same memory bank at the same time.
+
+\subsection{Coalesced Access}
+The implementation ensures that memory access patterns on the GPU are coalesced, allowing consecutive threads to access consecutive memory addresses. This coalescing reduces the overhead of global memory access.
+
+\section{Conclusion}
+Using shared memory in the Kuwahara filter implementation on the GPU resulted in a speedup of approximately 1.45x over the non-shared memory version. Optimizations such as coalesced memory access and reduced bank conflicts were effective in enhancing performance.
+
+\end{document}
